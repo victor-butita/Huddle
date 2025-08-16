@@ -10,12 +10,13 @@ import (
 
 var db *sql.DB
 
-// BoardModel represents the structure of the board in the database.
 type BoardModel struct {
 	ID           string
 	ContentCode  string
-	ContentTasks string // Stored as JSON string
+	ContentTasks string
+	ContentNotes string
 	HuddleLink   string
+	TeamData     string
 	LastUpdated  time.Time
 }
 
@@ -25,16 +26,11 @@ func initDB(filepath string) {
 	if err != nil {
 		log.Fatalf("[FATAL] Failed to open database: %v", err)
 	}
-
 	createTableSQL := `
 	CREATE TABLE IF NOT EXISTS boards (
-		id TEXT NOT NULL PRIMARY KEY,
-		content_code TEXT,
-		content_tasks TEXT,
-		huddle_link TEXT,
-		last_updated TIMESTAMP
+		id TEXT NOT NULL PRIMARY KEY, content_code TEXT, content_tasks TEXT,
+		content_notes TEXT, huddle_link TEXT, team_data TEXT, last_updated TIMESTAMP
 	);`
-
 	_, err = db.Exec(createTableSQL)
 	if err != nil {
 		log.Fatalf("[FATAL] Failed to create table: %v", err)
@@ -43,16 +39,15 @@ func initDB(filepath string) {
 }
 
 func getBoardFromDB(id string) (*BoardModel, error) {
-	stmt, err := db.Prepare("SELECT id, content_code, content_tasks, huddle_link, last_updated FROM boards WHERE id = ?")
+	stmt, err := db.Prepare("SELECT id, content_code, content_tasks, content_notes, huddle_link, team_data, last_updated FROM boards WHERE id = ?")
 	if err != nil {
 		return nil, err
 	}
 	defer stmt.Close()
-
 	board := &BoardModel{}
-	err = stmt.QueryRow(id).Scan(&board.ID, &board.ContentCode, &board.ContentTasks, &board.HuddleLink, &board.LastUpdated)
+	err = stmt.QueryRow(id).Scan(&board.ID, &board.ContentCode, &board.ContentTasks, &board.ContentNotes, &board.HuddleLink, &board.TeamData, &board.LastUpdated)
 	if err == sql.ErrNoRows {
-		return nil, nil // Not an error, just means it doesn't exist
+		return nil, nil
 	}
 	return board, err
 }
@@ -63,14 +58,12 @@ func createOrUpdateBoard(board *BoardModel) error {
 	if err != nil {
 		return err
 	}
-
-	stmt, err := tx.Prepare("INSERT OR REPLACE INTO boards (id, content_code, content_tasks, huddle_link, last_updated) VALUES (?, ?, ?, ?, ?)")
+	stmt, err := tx.Prepare("INSERT OR REPLACE INTO boards (id, content_code, content_tasks, content_notes, huddle_link, team_data, last_updated) VALUES (?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
-
-	_, err = stmt.Exec(board.ID, board.ContentCode, board.ContentTasks, board.HuddleLink, board.LastUpdated)
+	_, err = stmt.Exec(board.ID, board.ContentCode, board.ContentTasks, board.ContentNotes, board.HuddleLink, board.TeamData, board.LastUpdated)
 	if err != nil {
 		tx.Rollback()
 		return err
@@ -79,20 +72,13 @@ func createOrUpdateBoard(board *BoardModel) error {
 }
 
 func cleanupOldBoards() {
-	// This function can be called periodically to delete old boards.
-	// We'll add a ticker in the hub to call this.
 	log.Println("[INFO] Running cleanup for old boards...")
-	query := "DELETE FROM boards WHERE last_updated < ?"
-
-	// Delete boards older than 24 hours
 	cutoff := time.Now().Add(-24 * time.Hour)
-
-	res, err := db.Exec(query, cutoff)
+	res, err := db.Exec("DELETE FROM boards WHERE last_updated < ?", cutoff)
 	if err != nil {
 		log.Printf("[ERROR] Failed to clean up old boards: %v", err)
 		return
 	}
-
 	rowsAffected, _ := res.RowsAffected()
 	if rowsAffected > 0 {
 		log.Printf("[INFO] Cleaned up %d old boards.", rowsAffected)

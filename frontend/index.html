@@ -1,61 +1,86 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Huddle - Instant Collaboration</title>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Huddle - Instant Collaboration</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/style.css">
 </head>
 <body>
     <div id="app-container">
-        <!-- Home View -->
         <div id="home-view" class="view active">
             <div class="home-card">
+                <div class="logo-icon"><i class="bi bi-people-fill"></i></div>
                 <h1 class="logo">Huddle</h1>
-                <p class="tagline">The instant, ephemeral workspace for your team.</p>
-                <button id="create-board-btn" class="btn-primary">
-                    <i class="bi bi-plus-lg"></i> Create New Huddle
-                </button>
+                <p class="tagline">The instant, ephemeral command center for your team.</p>
+                <button id="create-board-btn" class="btn-primary"><i class="bi bi-plus-lg"></i> Create New Huddle</button>
             </div>
         </div>
-
-        <!-- Board View -->
         <div id="board-view" class="view">
             <div class="main-content">
-                <div class="huddle-link-bar">
-                    <i class="bi bi-camera-video-fill"></i>
-                    <input type="text" id="huddle-link-input" placeholder="Paste your Zoom, Meet, or Teams link here...">
+                <nav class="main-nav">
+                    <button class="nav-tab active" data-tab="code"><i class="bi bi-code-slash"></i> Code</button>
+                    <button class="nav-tab" data-tab="plan"><i class="bi bi-check2-square"></i> Plan</button>
+                    <button class="nav-tab" data-tab="notes"><i class="bi bi-journal-text"></i> Notes</button>
+                </nav>
+                <div class="main-panel active" id="code-panel">
+                    <div class="code-toolbar">
+                        <select id="language-select">
+                            <option value="javascript">JavaScript</option><option value="typescript">TypeScript</option><option value="python">Python</option>
+                            <option value="go">Go</option><option value="rust">Rust</option><option value="java">Java</option>
+                            <option value="csharp">C#</option><option value="cpp">C++</option><option value="php">PHP</option>
+                            <option value="ruby">Ruby</option><option value="html">HTML</option><option value="css">CSS</option>
+                            <option value="sql">SQL</option><option value="json">JSON</option><option value="yaml">YAML</option>
+                        </select>
+                        <div class="divider"></div>
+                        <button class="toolbar-btn" data-ai-action="analyze"><i class="bi bi-magic"></i> Analyze</button>
+                        <button class="toolbar-btn" data-ai-action="refactor"><i class="bi bi-shuffle"></i> Refactor</button>
+                        <button class="toolbar-btn" data-ai-action="add_comments"><i class="bi bi-chat-left-quote"></i> Add Comments</button>
+                    </div>
+                    <div id="editor-container"></div>
                 </div>
-                <div id="editor-container"></div>
+                <div class="main-panel" id="plan-panel">
+                    <div class="plan-header"><h2>Task Board</h2>
+                        <div class="progress-container"><span>Progress</span><div class="progress-bar"><div id="progress-bar-inner"></div></div><span id="progress-text">0%</span></div>
+                    </div>
+                    <div id="task-board"></div>
+                </div>
+                <div class="main-panel" id="notes-panel"><textarea id="notes-editor"></textarea></div>
             </div>
             <aside class="sidebar">
-                <div class="sidebar-header">
-                    <h1 class="logo-small">Huddle</h1>
+                <div class="panel" id="team-panel">
+                    <div class="panel-header"><h2 class="panel-title">Team</h2><button id="edit-user-btn" class="edit-btn"><i class="bi bi-pencil-square"></i></button></div>
+                    <ul id="team-list"></ul>
                 </div>
-                <div class="sidebar-content">
-                    <div class="panel">
-                        <h2 class="panel-title">Quick Tasks</h2>
-                        <ul id="task-list"></ul>
-                        <div class="task-input-area">
-                            <input type="text" id="task-input" placeholder="Add a new task...">
-                            <button id="add-task-btn"><i class="bi bi-plus-lg"></i></button>
-                        </div>
-                    </div>
+                <div class="panel" id="voice-panel"><h2 class="panel-title">Voice Chat</h2><div id="voice-chat-container"></div>
+                    <button id="join-voice-btn" class="btn-secondary"><i class="bi bi-mic-fill"></i> Join Voice</button>
                 </div>
-                 <div class="sidebar-footer">
-                    <button id="export-btn" class="btn-secondary">
-                        <i class="bi bi-download"></i> Export as Markdown
-                    </button>
-                </div>
+                <div class="panel" id="meeting-panel"><h2 class="panel-title">Meeting Link</h2><div class="meeting-link-bar"><i class="bi bi-camera-video"></i><input type="text" id="huddle-link-input" placeholder="Paste call link here..."></div></div>
+                <div class="panel chat-panel"><h2 class="panel-title">Chat</h2><div id="chat-messages" class="chat-messages"></div><div class="chat-input-area"><input type="text" id="chat-input" placeholder="Type a message..."><button id="send-chat-btn"><i class="bi bi-send-fill"></i></button></div></div>
             </aside>
         </div>
     </div>
-    <!-- Monaco Editor Loader -->
+    <div id="modal-overlay" class="hidden">
+        <div class="modal-container">
+            <div id="onboarding-modal" class="modal-content">
+                <h3>Welcome to Huddle!</h3><p>Please enter your name to join the team.</p>
+                <div class="user-profile-setup"><span id="user-avatar-setup"></span><input type="text" id="user-name-setup" placeholder="Your Name" maxlength="15"></div>
+                <button id="join-huddle-btn" class="btn-primary">Join Huddle</button>
+            </div>
+            <div id="ai-modal" class="modal-content hidden">
+                <h3 id="ai-modal-title">AI Assistant</h3><div id="ai-modal-text"></div><button id="ai-modal-close-btn" class="btn-secondary">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- External Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.44.0/min/vs/loader.js"></script>
+    <!-- THIS SCRIPT WAS MISSING, CAUSING THE 'marked is not defined' ERROR. IT IS NOW INCLUDED. -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- The Jitsi/8x8 Voice Chat API -->
+    <script src="https://8x8.vc/vpaas-magic-cookie-a4a2310b852a4547bbb977f884a8607a/external_api.js" async></script>
+    <!-- Our Application Logic -->
     <script src="/app.js"></script>
 </body>
 </html>
