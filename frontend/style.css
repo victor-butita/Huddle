@@ -1,3 +1,23 @@
+/* Add these styles to the end of your style.css file */
+.hidden {
+    display: none !important;
+}
+
+#voice-controls {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.75rem; /* Replaces margin-bottom on voice-chat-container */
+}
+
+#voice-controls .btn-secondary {
+    flex-grow: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+}
+
+/* Original CSS (keep as is) */
 :root {
     --brand-blue: #4f46e5; --brand-blue-dark: #4338ca; --background-primary: #f9fafb; --background-secondary: #ffffff;
     --background-tertiary: #f3f4f6; --text-primary: #111827; --text-secondary: #6b7280; --border-color: #e5e7eb;
@@ -66,7 +86,7 @@ body { margin: 0; font-family: var(--font-family); background-color: var(--backg
 .chat-input-area { display: flex; gap: 0.5rem; padding: 0 1.25rem 1.25rem; }
 .chat-input-area input { width: 100%; border: 1px solid var(--border-color); border-radius: 6px; padding: 0.5rem 0.75rem; background: var(--background-secondary); }
 .chat-input-area button { border: none; background: var(--brand-blue); color: white; border-radius: 6px; width: 36px; height: 36px; flex-shrink: 0; cursor: pointer; }
-#voice-chat-container { height: 120px; background: var(--background-tertiary); border-radius: 8px; margin-bottom: 0.75rem; display: none; }
+#voice-chat-container { height: 120px; background: var(--background-tertiary); border-radius: 8px; /* margin-bottom: 0.75rem; */ display: none; }
 #modal-overlay { position: fixed; inset: 0; background: rgba(17, 24, 39, 0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; opacity: 1; transition: opacity 0.3s; }
 #modal-overlay.hidden { opacity: 0; pointer-events: none; }
 .modal-container { display: flex; }

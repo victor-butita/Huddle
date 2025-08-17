@@ -1,7 +1,41 @@
+// This function is made globally available for the inline `onerror` handlers in index.html.
+// It provides a clear, immediate way to update the UI if a script is blocked.
+window.updateComponentStatus = (component, isLoaded) => {
+    if (component === 'ai-components') {
+        const aiButtons = document.querySelectorAll('.toolbar-btn');
+        if (isLoaded) {
+            aiButtons.forEach(btn => {
+                btn.disabled = false;
+                btn.title = ''; // Clear the "loading" tooltip
+            });
+            console.log("AI components (marked.js) are ready.");
+        } else {
+            aiButtons.forEach(btn => {
+                btn.disabled = true;
+                btn.title = 'AI components failed to load. Please check your ad-blocker or network connection.';
+            });
+        }
+    } else if (component === 'voice-chat') {
+        const joinBtn = document.getElementById('join-voice-btn');
+        const statusEl = document.getElementById('voice-status');
+        if (isLoaded) {
+            joinBtn.disabled = false;
+            statusEl.textContent = 'Ready to connect.';
+            statusEl.style.color = 'inherit';
+            console.log("Voice Chat API (Jitsi) is ready.");
+        } else {
+            joinBtn.disabled = true;
+            statusEl.textContent = 'Voice chat failed to load. Check ad-blocker.';
+            statusEl.style.color = '#e53935'; // Use a distinct error color
+        }
+    }
+};
+
 document.addEventListener('DOMContentLoaded', () => {
     // --- State Management ---
     const state = {
-        boardId: null, ws: null, editor: null, jitsiApi: null, editorReadyPromise: null,
+        boardId: null, ws: null, editor: null, editorReadyPromise: null,
+        jitsiApi: null, isVoiceConnected: false, isMuted: false,
         user: { id: null, name: "Guest", color: getRandomColor() },
         team: [], tasks: [], programmaticChange: false, debounceTimers: {}
     };
@@ -21,14 +55,18 @@ document.addEventListener('DOMContentLoaded', () => {
         userAvatarSetup: document.getElementById('user-avatar-setup'), userNameSetup: document.getElementById('user-name-setup'),
         joinHuddleBtn: document.getElementById('join-huddle-btn'), aiModalTitle: document.getElementById('ai-modal-title'),
         aiModalText: document.getElementById('ai-modal-text'), aiModalCloseBtn: document.getElementById('ai-modal-close-btn'),
-        editUserBtn: document.getElementById('edit-user-btn'), voiceChatContainer: document.getElementById('voice-chat-container'),
-        joinVoiceBtn: document.getElementById('join-voice-btn')
+        editUserBtn: document.getElementById('edit-user-btn'),
+        voiceChatContainer: document.getElementById('voice-chat-container'),
+        joinVoiceBtn: document.getElementById('join-voice-btn'),
+        leaveVoiceBtn: document.getElementById('leave-voice-btn'),
+        muteVoiceBtn: document.getElementById('mute-voice-btn'),
+        voiceStatus: document.getElementById('voice-status')
     };
 
     // --- Core Application Logic ---
     function init() {
-        console.log("Huddle App Initializing...");
         setupEventListeners();
+        checkDependencies();
         route();
     }
 
@@ -46,7 +84,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function initBoard() {
-        console.log("Initializing board...");
         state.editorReadyPromise = initMonacoEditor();
         const storedUser = localStorage.getItem('huddleUser');
         if (storedUser) {
@@ -58,6 +95,31 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // --- Event Listeners ---
+    function setupEventListeners() {
+        DOM.createBoardBtn.onclick = () => { window.location.href = `/b/${Math.random().toString(36).substring(2, 12)}`; };
+        DOM.navTabs.forEach(tab => tab.onclick = () => switchTab(tab.dataset.tab));
+        DOM.userNameSetup.oninput = () => {
+            const name = DOM.userNameSetup.value.trim() || "?";
+            DOM.userAvatarSetup.style.backgroundColor = state.user.color;
+            DOM.userAvatarSetup.textContent = name.charAt(0).toUpperCase();
+        };
+        DOM.joinHuddleBtn.onclick = handleJoinHuddle;
+        DOM.editUserBtn.onclick = handleEditUser;
+        DOM.huddleLinkInput.oninput = () => debounce('link', () => sendMessage({ type: "LINK_UPDATE", payload: DOM.huddleLinkInput.value }), 500);
+        DOM.notesEditor.oninput = () => debounce('notes', () => sendMessage({ type: "NOTES_UPDATE", payload: DOM.notesEditor.value }), 500);
+        DOM.taskBoard.addEventListener('click', handleTaskBoardClick);
+        DOM.taskBoard.addEventListener('keydown', handleTaskInputKeydown);
+        DOM.taskBoard.addEventListener('dblclick', handleTaskTextEdit);
+        DOM.sendChatBtn.onclick = handleSendChat;
+        DOM.chatInput.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendChat(); } };
+        DOM.aiToolbarButtons.forEach(btn => btn.onclick = () => handleAIRequest(btn.dataset.aiAction));
+        DOM.aiModalCloseBtn.onclick = () => DOM.modalOverlay.classList.add('hidden');
+        DOM.joinVoiceBtn.onclick = joinVoiceChat;
+        DOM.leaveVoiceBtn.onclick = leaveVoiceChat;
+        DOM.muteVoiceBtn.onclick = toggleMute;
+    }
+
     // --- WebSocket ---
     function connectWebSocket() {
         if (state.ws) return;
@@ -67,7 +129,7 @@ document.addEventListener('DOMContentLoaded', () => {
         state.ws.onopen = () => console.log("WebSocket Connected.");
         state.ws.onerror = (error) => console.error("WebSocket Error:", error);
     }
-    
+
     function handleWebSocketMessage(event) {
         const msg = JSON.parse(event.data);
         state.programmaticChange = true;
@@ -85,19 +147,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- State & UI Updates ---
     async function updateFullState(payload, clientId) {
-        console.log("Received INITIAL_STATE. Awaiting editor readiness...");
         state.user.id = clientId;
         await state.editorReadyPromise;
-        console.log("Editor ready. Proceeding with state updates.");
-        
         updateCode(payload.contentCode);
         updateTasks(payload.contentTasks);
         updateNotes(payload.contentNotes);
         updateLink(payload.huddleLink);
-        
         const currentTeam = payload.team || [];
         const userExists = currentTeam.some(member => member.id === state.user.id);
-        
         if (!userExists) {
             const updatedTeam = [...currentTeam, state.user];
             sendMessage({ type: "TEAM_UPDATE", payload: updatedTeam });
@@ -106,15 +163,11 @@ document.addEventListener('DOMContentLoaded', () => {
             updateTeam(currentTeam);
         }
     }
-    async function updateCode(payload) {
-        await state.editorReadyPromise;
-        if (state.editor.getValue() !== payload) state.editor.setValue(payload);
-    }
+    async function updateCode(payload) { await state.editorReadyPromise; if (state.editor.getValue() !== payload) { state.editor.setValue(payload); } }
     function updateTasks(payload) { state.tasks = payload || []; renderTasks(); }
-    function updateNotes(payload) { if (document.activeElement !== DOM.notesEditor) { DOM.notesEditor.value = payload; } }
-    function updateLink(payload) { if (document.activeElement !== DOM.huddleLinkInput) { DOM.huddleLinkInput.value = payload; } }
+    function updateNotes(payload) { if (document.activeElement !== DOM.notesEditor) DOM.notesEditor.value = payload; }
+    function updateLink(payload) { if (document.activeElement !== DOM.huddleLinkInput) DOM.huddleLinkInput.value = payload; }
     function updateTeam(payload) { state.team = payload || []; renderTeam(); }
-
     function renderTasks() {
         DOM.taskBoard.innerHTML = '';
         state.tasks.forEach(task => {
@@ -150,29 +203,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
         DOM.progressBar.style.width = `${percent}%`;
         DOM.progressText.textContent = `${percent}%`;
-    }
-
-    // --- Event Listeners ---
-    function setupEventListeners() {
-        DOM.createBoardBtn.onclick = () => { window.location.href = `/b/${Math.random().toString(36).substring(2, 12)}`; };
-        DOM.navTabs.forEach(tab => tab.onclick = () => switchTab(tab.dataset.tab));
-        DOM.userNameSetup.oninput = () => {
-            const name = DOM.userNameSetup.value.trim() || "?";
-            DOM.userAvatarSetup.style.backgroundColor = state.user.color;
-            DOM.userAvatarSetup.textContent = name.charAt(0).toUpperCase();
-        };
-        DOM.joinHuddleBtn.onclick = handleJoinHuddle;
-        DOM.editUserBtn.onclick = handleEditUser;
-        DOM.huddleLinkInput.oninput = () => debounce('link', () => sendMessage({ type: "LINK_UPDATE", payload: DOM.huddleLinkInput.value }), 500);
-        DOM.notesEditor.oninput = () => debounce('notes', () => sendMessage({ type: "NOTES_UPDATE", payload: DOM.notesEditor.value }), 500);
-        DOM.taskBoard.addEventListener('click', handleTaskBoardClick);
-        DOM.taskBoard.addEventListener('keydown', handleTaskInputKeydown);
-        DOM.taskBoard.addEventListener('dblclick', handleTaskTextEdit);
-        DOM.sendChatBtn.onclick = handleSendChat;
-        DOM.chatInput.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendChat(); } };
-        DOM.aiToolbarButtons.forEach(btn => btn.onclick = () => handleAIRequest(btn.dataset.aiAction));
-        DOM.aiModalCloseBtn.onclick = () => DOM.modalOverlay.classList.add('hidden');
-        DOM.joinVoiceBtn.onclick = handleVoiceButtonClick;
     }
 
     // --- Event Handlers ---
@@ -256,9 +286,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     async function handleAIRequest(action) {
-        // The fix for 'marked is not defined' is to check if the library is loaded.
-        if (typeof marked === 'undefined') {
-            alert("Markdown library is still loading. Please try again in a moment.");
+        if (typeof window.marked === 'undefined') {
+            alert("AI components are not available. This is likely due to an ad-blocker or network issue.");
             return;
         }
         await state.editorReadyPromise;
@@ -266,48 +295,99 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!code.trim()) { alert("There is no code to analyze."); return; }
         showModal(`AI Assistant: ${action.replace('_', ' ')}`, "Thinking...");
         try {
-            const response = await fetch('/api/ai', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action, code, lang: DOM.languageSelect.value })
-            });
+            const response = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, code, lang: DOM.languageSelect.value }) });
             const data = await response.json();
             if (!response.ok) throw new Error(data.error);
             if (action === "refactor" || action === "add_comments") {
                 state.editor.setValue(extractCodeFromMarkdown(data.result));
                 DOM.modalOverlay.classList.add('hidden');
             } else {
-                DOM.aiModalText.innerHTML = marked.parse(data.result);
+                DOM.aiModalText.innerHTML = window.marked.parse(data.result);
             }
         } catch (error) { DOM.aiModalText.textContent = `Error: ${error.message}`; }
     }
-    function handleVoiceButtonClick() {
-        // The fix for the voice chat is to check if the Jitsi library is loaded.
-        if (typeof JitsiMeetExternalAPI === 'undefined') {
-            alert("Voice chat components are still loading. Please try again in a moment.");
+
+    // --- Voice Chat Logic ---
+    function joinVoiceChat() {
+        if (state.isVoiceConnected || typeof window.JitsiMeetExternalAPI === 'undefined') {
+            DOM.voiceStatus.textContent = 'Component not loaded.';
             return;
         }
+        DOM.voiceChatContainer.style.display = 'block';
+        DOM.voiceStatus.textContent = 'Connecting...';
+        DOM.voiceStatus.style.display = 'block';
+
+        const options = {
+            roomName: `Huddle-Voice-${state.boardId}`,
+            width: '100%', height: '100%',
+            parentNode: DOM.voiceChatContainer,
+            configOverwrite: { prejoinPageEnabled: false, startWithAudioMuted: false, startWithVideoMuted: true },
+            interfaceConfigOverwrite: { TOOLBAR_BUTTONS: ['microphone', 'hangup'], SHOW_JITSI_WATERMARK: false, DEFAULT_BACKGROUND: '#F3F4F6' }
+        };
+
+        try {
+            state.jitsiApi = new JitsiMeetExternalAPI('8x8.vc', options);
+            state.jitsiApi.on('videoConferenceJoined', () => {
+                state.isVoiceConnected = true;
+                DOM.voiceStatus.style.display = 'none';
+                state.jitsiApi.executeCommand('displayName', state.user.name);
+                state.jitsiApi.isAudioMuted().then(muted => {
+                    state.isMuted = muted;
+                    updateVoiceChatUI();
+                });
+            });
+            state.jitsiApi.on('audioMuteStatusChanged', (payload) => { state.isMuted = payload.muted; updateMuteButtonUI(); });
+            state.jitsiApi.on('videoConferenceLeft', () => leaveVoiceChat());
+        } catch (error) {
+            console.error("Failed to initialize Jitsi API:", error);
+            DOM.voiceChatContainer.style.display = 'none';
+            window.updateComponentStatus('voice-chat', false);
+        }
+    }
+    function leaveVoiceChat() {
+        if (!state.isVoiceConnected) return;
         if (state.jitsiApi) {
             state.jitsiApi.dispose();
             state.jitsiApi = null;
-            DOM.voiceChatContainer.style.display = 'none';
-            DOM.joinVoiceBtn.innerHTML = `<i class="bi bi-mic-fill"></i> Join Voice`;
-        } else {
-            const options = {
-                roomName: `Huddle-Voice-${state.boardId}`,
-                width: '100%',
-                height: '100%',
-                parentNode: DOM.voiceChatContainer,
-                configOverwrite: { prejoinPageEnabled: false, startWithAudioMuted: false },
-                interfaceConfigOverwrite: { TOOLBAR_BUTTONS: ['microphone', 'hangup'], DEFAULT_BACKGROUND: '#F3F4F6' }
-            };
-            state.jitsiApi = new JitsiMeetExternalAPI('8x8.vc', options);
-            state.jitsiApi.executeCommand('displayName', state.user.name);
-            DOM.voiceChatContainer.style.display = 'block';
-            DOM.joinVoiceBtn.innerHTML = `<i class="bi bi-mic-mute-fill"></i> Leave Voice`;
         }
+        state.isVoiceConnected = false;
+        DOM.voiceChatContainer.style.display = 'none';
+        DOM.voiceStatus.style.display = 'block';
+        DOM.voiceStatus.textContent = 'Ready to connect.';
+        updateVoiceChatUI();
+    }
+    function updateVoiceChatUI() {
+        DOM.joinVoiceBtn.classList.toggle('hidden', state.isVoiceConnected);
+        DOM.leaveVoiceBtn.classList.toggle('hidden', !state.isVoiceConnected);
+        DOM.muteVoiceBtn.classList.toggle('hidden', !state.isVoiceConnected);
+        if (state.isVoiceConnected) {
+            updateMuteButtonUI();
+        }
+    }
+    function updateMuteButtonUI() {
+        DOM.muteVoiceBtn.innerHTML = state.isMuted ? `<i class="bi bi-mic-fill"></i> Unmute` : `<i class="bi bi-mic-mute-fill"></i> Mute`;
+    }
+    function toggleMute() {
+        if (state.jitsiApi) state.jitsiApi.executeCommand('toggleAudio');
     }
 
     // --- Utilities ---
+    function checkDependencies() {
+        // This acts as a fallback. The `onerror` handlers in index.html are the primary detection method.
+        setTimeout(() => {
+            if (!window.marked) {
+                window.updateComponentStatus('ai-components', false);
+            } else {
+                window.updateComponentStatus('ai-components', true);
+            }
+            if (!window.jitsiApiLoaded) {
+                 window.updateComponentStatus('voice-chat', false);
+            } else {
+                 window.updateComponentStatus('voice-chat', true);
+            }
+        }, 3000); // Check after 3 seconds
+    }
+
     function initMonacoEditor() {
         if (state.editorReadyPromise) return state.editorReadyPromise;
         state.editorReadyPromise = new Promise((resolve, reject) => {
@@ -337,16 +417,28 @@ document.addEventListener('DOMContentLoaded', () => {
         DOM.aiModalText.innerHTML = text;
         DOM.modalOverlay.classList.remove('hidden');
     }
-    function debounce(key, func, delay) { clearTimeout(state.debounceTimers[key]); state.debounceTimers[key] = setTimeout(func, delay); }
+    function debounce(key, func, delay) {
+        clearTimeout(state.debounceTimers[key]);
+        state.debounceTimers[key] = setTimeout(func, delay);
+    }
     function extractCodeFromMarkdown(markdown) {
         const match = markdown.match(/```(?:\w*\n)?([\s\S]*?)```/);
-        // This is the fix for 'match.trim is not a function'
         return match && match[1] ? match[1].trim() : markdown;
     }
-    function getRandomColor() { const c = ["#e53935","#d81b60","#8e24aa","#5e35b1","#3949ab","#1e88e5","#039be5","#00acc1","#00897b","#43a047","#f4511e"]; return c[Math.floor(Math.random()*c.length)]; }
-    function escapeHTML(str) { const p = document.createElement('p'); p.appendChild(document.createTextNode(str)); return p.innerHTML; }
-    function sendMessage(data) { if (state.ws && state.ws.readyState === WebSocket.OPEN) state.ws.send(JSON.stringify(data)); }
+    function getRandomColor() {
+        const c = ["#e53935","#d81b60","#8e24aa","#5e35b1","#3949ab","#1e88e5","#039be5","#00acc1","#00897b","#43a047","#f4511e"];
+        return c[Math.floor(Math.random()*c.length)];
+    }
+    function escapeHTML(str) {
+        const p = document.createElement('p');
+        p.appendChild(document.createTextNode(str));
+        return p.innerHTML;
+    }
+    function sendMessage(data) {
+        if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+            state.ws.send(JSON.stringify(data));
+        }
+    }
 
-    // --- Start Application ---
     init();
 });
